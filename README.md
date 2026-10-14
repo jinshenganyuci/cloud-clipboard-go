@@ -1,5 +1,17 @@
 # 2026年10月09日 本项目停更,项目已切换至 https://github.com/Jonnyan404/clip9
 
+## This fork's Docker image
+
+This fork fixes the timeline so the newest message appears immediately, including messages received in the same second. Images are built from this repository for `linux/amd64`, `linux/arm64`, and `linux/arm/v7`.
+
+In an existing Compose file, replace only the image:
+
+```yaml
+image: jinshenganyuci/cloud-clipboard-go:latest
+```
+
+Then run `docker compose pull && docker compose up -d`. Keep your existing ports, environment variables, and `/app/server-node/data` volume mapping. To pin this release, use `jinshenganyuci/cloud-clipboard-go:v5.2.2-latest-first.1`.
+
 <h1 align="center"> Cloud Clipboard Go </h1>
 
 <p align="center">
@@ -85,7 +97,7 @@ docker run -d \
   --name cloud-clipboard-go \
   -p 9501:9501 \
   -v /path/to/data:/app/server-node/data \
-  ghcr.io/jonnyan404/cloud-clipboard-go:latest
+  jinshenganyuci/cloud-clipboard-go:latest
 ```
 
 #### Docker Compose
@@ -95,8 +107,8 @@ docker run -d \
 ```yaml
 services:
   cloud-clipboard-go:
-    image: ghcr.io/jonnyan404/cloud-clipboard-go:latest
-    #image: jonnyan404/cloud-clipboard-go:latest
+    image: jinshenganyuci/cloud-clipboard-go:latest
+    #image: jinshenganyuci/cloud-clipboard-go:v5.2.2-latest-first.1
     container_name: cloud-clipboard-go
     restart: always
     ports:

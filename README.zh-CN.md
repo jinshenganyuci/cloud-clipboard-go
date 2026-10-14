@@ -1,3 +1,15 @@
+## 本 fork 的 Docker 镜像
+
+修复打开网页时等待消息滚动的问题：最新消息立即显示在前，同一秒收到多条消息时按消息 ID 倒序排列。镜像从本仓库源码构建，支持 `linux/amd64`、`linux/arm64` 和 `linux/arm/v7`。
+
+现有 Compose 只需替换镜像：
+
+```yaml
+image: jinshenganyuci/cloud-clipboard-go:latest
+```
+
+然后执行 `docker compose pull && docker compose up -d`。保留现有端口、环境变量和 `/app/server-node/data` 数据卷映射。需要固定版本时使用 `jinshenganyuci/cloud-clipboard-go:v5.2.2-latest-first.1`。
+
 <h1 align="center"> Cloud Clipboard Go </h1>
 
 <p align="center">
@@ -83,7 +95,7 @@ docker run -d \
   --name cloud-clipboard-go \
   -p 9501:9501 \
   -v /path/to/data:/app/server-node/data \
-  ghcr.io/jonnyan404/cloud-clipboard-go:latest
+  jinshenganyuci/cloud-clipboard-go:latest
 ```
 
 #### Docker Compose
@@ -93,8 +105,8 @@ docker run -d \
 ```yaml
 services:
   cloud-clipboard-go:
-    image: ghcr.io/jonnyan404/cloud-clipboard-go:latest
-    #image: jonnyan404/cloud-clipboard-go:latest
+    image: jinshenganyuci/cloud-clipboard-go:latest
+    #image: jinshenganyuci/cloud-clipboard-go:v5.2.2-latest-first.1
     container_name: cloud-clipboard-go
     restart: always
     ports:
