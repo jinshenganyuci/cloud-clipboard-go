@@ -498,8 +498,10 @@ export const useWebSocketStore = defineStore('websocket', {
                 }
             }
 
-            // 按时间倒序排列 (最新的排在最前)
-            currentList.sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
+            // 时间戳只有秒级精度；同一秒内的消息用递增 ID 倒序，确保最新一条在前。
+            currentList.sort((a, b) =>
+                (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0)
+                || (Number(b.id) || 0) - (Number(a.id) || 0));
 
             // 如果有配置历史条数限制，进行截断
             const limit = Number(app.config?.server?.history || 0);
