@@ -1,4 +1,8 @@
 {
+  "loadOlderMessages": "以前のメッセージを表示",
+  "loadingOlderMessages": "以前のメッセージを読み込み中…",
+  "loadingLatestMessages": "最新のメッセージを読み込み中…",
+  "retryHistory": "履歴の読み込みに失敗しました。再試行",
   "settings": "設定",
   "about": "このアプリについて",
   "github": "GitHub",

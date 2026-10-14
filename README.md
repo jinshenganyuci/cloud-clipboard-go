@@ -2,7 +2,7 @@
 
 ## This fork's Docker image
 
-This fork fixes the timeline so the newest message appears immediately, including messages received in the same second. Images are built from this repository for `linux/amd64`, `linux/arm64`, and `linux/arm/v7`.
+This fork fixes the timeline so the newest message appears immediately, including messages received in the same second. The first request fetches the newest 10 messages, then loads older history automatically in batches of 50. The timeline initially mounts at most 20 cards and reveals more as you scroll; search covers the loaded history while the loading indicator remains visible until it is complete. Images are built from this repository for `linux/amd64`, `linux/arm64`, and `linux/arm/v7`.
 
 In an existing Compose file, replace only the image:
 
@@ -10,7 +10,7 @@ In an existing Compose file, replace only the image:
 image: jinshenganyuci/cloud-clipboard-go:latest
 ```
 
-Then run `docker compose pull && docker compose up -d`. Keep your existing ports, environment variables, and `/app/server-node/data` volume mapping. To pin this release, use `jinshenganyuci/cloud-clipboard-go:v5.2.2-latest-first.1`.
+Then run `docker compose pull && docker compose up -d`. Keep your existing ports, environment variables, and `/app/server-node/data` volume mapping. To pin this release, use `jinshenganyuci/cloud-clipboard-go:v5.2.2-latest-first.2`.
 
 <h1 align="center"> Cloud Clipboard Go </h1>
 
@@ -108,7 +108,7 @@ docker run -d \
 services:
   cloud-clipboard-go:
     image: jinshenganyuci/cloud-clipboard-go:latest
-    #image: jinshenganyuci/cloud-clipboard-go:v5.2.2-latest-first.1
+    #image: jinshenganyuci/cloud-clipboard-go:v5.2.2-latest-first.2
     container_name: cloud-clipboard-go
     restart: always
     ports:

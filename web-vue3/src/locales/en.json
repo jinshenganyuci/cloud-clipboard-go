@@ -1,4 +1,8 @@
 {
+  "loadOlderMessages": "Load older messages",
+  "loadingOlderMessages": "Loading older messages…",
+  "loadingLatestMessages": "Loading latest messages…",
+  "retryHistory": "History could not be loaded. Retry",
   "settings": "Settings",
   "about": "About",
   "github": "GitHub",

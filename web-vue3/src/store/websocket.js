@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { markRaw, nextTick } from 'vue';
 import axios from 'axios';
 import router from '@/router';
 import { APP_BASE_URL } from '@/base.js';
@@ -101,6 +102,10 @@ export const useWebSocketStore = defineStore('websocket', {
         latency: null,
         pendingReceiveQueue: [],
         receiveFlushTimer: null,
+        historyController: null,
+        historyLoading: false,
+        historyError: false,
+        historyChanges: new Map(),
     }),
 
     getters: {
@@ -494,6 +499,7 @@ export const useWebSocketStore = defineStore('websocket', {
                     const idx = existingIdMap.get(item.id);
                     currentList[idx] = { ...currentList[idx], ...item };
                 } else {
+                    existingIdMap.set(item.id, currentList.length);
                     currentList.push(item);
                 }
             }
@@ -520,43 +526,87 @@ export const useWebSocketStore = defineStore('websocket', {
                 }, 32);
             }
         },
-        // 从 `GET /content` 取这个房间的历史 —— 握手不再推历史之后，历史就只剩这一条路。
-        //
-        // ⚠️★ **必须真的去请求一次**：不请求的话「刷新一下就什么都看不到了」——
-        // 这是这个变更最容易漏的一条，`docs/specs/ws-live-only.md` §5 第 8 条专门点了它。
+        cancelHistoryLoad() {
+            this.historyController?.abort();
+            this.historyController = null;
+            this.historyLoading = false;
+            this.historyChanges.clear();
+        },
+        rememberHistoryChange(data, revoked = false) {
+            if (!this.historyLoading) return;
+            const key = String(data.id);
+            const previous = this.historyChanges.get(key);
+            // A delayed HTTP page must never resurrect a revoked item or undo a live edit.
+            if (previous === null) return;
+            this.historyChanges.set(key, revoked ? null : { ...previous, ...data });
+        },
         async loadHistoryFromHttp(room = this.room) {
+            this.cancelHistoryLoad();
             const normalizedRoom = this.normalizeRoomName(room);
+            const controller = markRaw(new AbortController());
+            this.historyController = controller;
+            this.historyChanges = new Map();
+            this.historyLoading = true;
+            this.historyError = false;
+            const isCurrent = () => this.historyController === controller
+                && !controller.signal.aborted && this.currentRoom === normalizedRoom;
             try {
-                const response = await axios.get('content', {
-                    params: new URLSearchParams([['room', normalizedRoom]]),
-                });
-                // 请求还在飞的时候房间被换掉了 —— 这批历史不属于当前房间，丢掉。
-                if (this.normalizeRoomName(this.room) !== normalizedRoom) {
-                    return;
+                let before = null;
+                let pageSize = 10;
+                let loadedCount = 0;
+                while (isCurrent()) {
+                    const params = new URLSearchParams([
+                        ['room', normalizedRoom], ['limit', String(pageSize)],
+                    ]);
+                    if (before !== null) params.set('before', String(before));
+                    const response = await axios.get('content', { params, signal: controller.signal });
+                    if (!isCurrent()) return;
+                    const messages = Array.isArray(response.data?.messages) ? response.data.messages : [];
+                    // Also stop safely with older servers that ignore the pagination cursor.
+                    const older = messages.filter(item => Number.isFinite(Number(item.id))
+                        && (before === null || Number(item.id) < before));
+                    if (!older.length) break;
+                    this.mergeMessages(older.flatMap(item => {
+                        const change = this.historyChanges.get(String(item.id));
+                        return change === null ? [] : [{ ...item, ...change }];
+                    }));
+                    loadedCount += older.length;
+                    before = Math.min(...older.map(item => Number(item.id)));
+                    const limit = Number(useAppStore().config?.server?.history || 0);
+                    if (messages.length < pageSize || (limit > 0 && loadedCount >= limit)) break;
+                    // Let Vue commit the recent messages and the browser paint them before
+                    // fetching more. A timer also works when the tab is in the background.
+                    await nextTick();
+                    await new Promise(resolve => setTimeout(resolve, 80));
+                    pageSize = 50;
                 }
-                const messages = response.data && Array.isArray(response.data.messages)
-                    ? response.data.messages
-                    : [];
-                // ⚠️ `mergeMessages` 按 id 去重，所以「`/content` 取回的这段」与
-                // 「请求还在飞的时候 WS 推来的实时」重叠时不会重影 —— 边界那几条不必额外处理。
-                this.mergeMessages(messages);
             } catch (error) {
-                // 取历史失败**不影响实时**：WS 照样连着、新消息照收，只是这个房间暂时是空的。
-                // 不做重试：下一次握手（重连 / 切房间回来）会再走一遍这里。
-                console.error('Failed to load history from /content:', error);
+                if (isCurrent()) {
+                    this.historyError = true;
+                    console.error('Failed to load history from /content:', error);
+                }
+            } finally {
+                if (this.historyController === controller) {
+                    this.historyController = null;
+                    this.historyLoading = false;
+                    this.historyChanges.clear();
+                }
             }
         },
         handleEvent(event, data) {
             const app = useAppStore();
             switch (event) {
                 case 'receive':
+                    this.rememberHistoryChange(data);
                     this.queueReceive(data);
                     break;
                 case 'receiveMulti':
+                    (Array.isArray(data) ? data : [data]).forEach(item => this.rememberHistoryChange(item));
                     this.flushPendingReceives();
                     this.mergeMessages(Array.isArray(data) ? data : [data]);
                     break;
                 case 'revoke': {
+                    this.rememberHistoryChange(data, true);
                     this.flushPendingReceives();
                     const index = app.received.findIndex(e => e.id === data.id);
                     if (index !== -1) {
@@ -588,6 +638,7 @@ export const useWebSocketStore = defineStore('websocket', {
                     break;
                 }
                 case 'update': {
+                    this.rememberHistoryChange(data);
                     this.flushPendingReceives();
                     const index = app.received.findIndex(e => e.id === data.id);
                     if (index !== -1) {
@@ -597,6 +648,7 @@ export const useWebSocketStore = defineStore('websocket', {
                     break;
                 }
                 case 'forbidden': {
+                    this.cancelHistoryLoad();
                     this.flushPendingReceives();
                     this.clearAuthTokenForRoom(this.room);
                     this.openAuthDialog(this.room);
@@ -614,6 +666,7 @@ export const useWebSocketStore = defineStore('websocket', {
             }
         },
         disconnect() {
+            this.cancelHistoryLoad();
             const app = useAppStore();
             this.websocketConnecting = false;
             if (this.websocket) {
@@ -648,6 +701,7 @@ export const useWebSocketStore = defineStore('websocket', {
             if (oldRoom === newRoom) {
                 return;
             }
+            this.cancelHistoryLoad();
             // 1. 先把当前视图（旧房间内容）保存回旧房间的 cache，避免混入新房间
             app.roomMessagesCache[oldRoom] = [...app.received];
             // 2. 断开旧连接并清空所有 handler，防止旧连接的残留消息写入新房间
@@ -702,6 +756,7 @@ export const useWebSocketStore = defineStore('websocket', {
             }
         },
         handleHttpUnauthorized(config = {}) {
+            this.cancelHistoryLoad();
             const room = this.getRequestRoom(config);
             this.clearAuthTokenForRoom(room);
             this.openAuthDialog(room);

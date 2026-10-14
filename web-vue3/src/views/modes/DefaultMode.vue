@@ -1,4 +1,4 @@
-<script setup>import { computed, nextTick, onMounted, ref, watch } from 'vue';
+<script setup>import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { isImageName, looksLikeTable, looksLikeTaskList } from '@/util.js';
 import { useAppStore } from '@/store/app';
 import { useWebSocketStore } from '@/store/websocket';
@@ -74,6 +74,30 @@ const filteredReceived = computed(() => {
     const wantImage = timelineFilter.value === 'image';
     return list.filter((item) => item.type === 'file' && isImageName(item.name) === wantImage);
 });
+// Keep offscreen cards unmounted: background history remains searchable without
+// creating hundreds of Vue/Vuetify trees during the first paint.
+const renderedCount = ref(20);
+const renderedReceived = computed(() => filteredReceived.value.slice(0, renderedCount.value));
+const historySentinel = ref(null);
+let historyObserver;
+function revealMore() {
+    renderedCount.value += 20;
+}
+watch([() => ws.room, () => app.searchQuery, timelineFilter, () => app.display.timelineFilter], () => {
+    renderedCount.value = 20;
+});
+onMounted(() => {
+    historyObserver = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) revealMore();
+    }, { rootMargin: '400px' });
+    if (historySentinel.value) historyObserver.observe(historySentinel.value);
+});
+watch(historySentinel, (element, previous) => {
+    if (previous) historyObserver?.unobserve(previous);
+    if (element) historyObserver?.observe(element);
+});
+onBeforeUnmount(() => historyObserver?.disconnect());
+
 const historyUsageLabel = computed(() => {
     const current = app.received.length;
     const limit = Number(app.config?.server?.history || 0);
@@ -169,7 +193,7 @@ watch(() => ws.room, () => {
 
                     <div v-if="app.received.length" class="timeline-panel__stream">
                         <div
-                            v-for="item in filteredReceived"
+                            v-for="item in renderedReceived"
                             :key="item.id"
                             class="timeline-panel__item"
                             :class="{ 'timeline-panel__item--first': item === filteredReceived[0] }"
@@ -189,13 +213,13 @@ watch(() => ws.room, () => {
                             />
                         </div>
                         <div
-                            v-if="!filteredReceived.length"
+                            v-if="!filteredReceived.length && !ws.historyLoading"
                             class="text-center text-caption text-medium-emphasis py-6"
                         >{{ t('filterEmpty') }}</div>
                     </div>
 
                     <v-sheet
-                        v-if="!app.received.length"
+                        v-if="!app.received.length && !ws.historyLoading && !ws.historyError"
                         class="empty-timeline py-10 px-6 text-center"
                         :class="{ 'empty-timeline--dark': isDark }"
                         rounded="lg"
@@ -209,7 +233,16 @@ watch(() => ws.room, () => {
                         </v-btn>
                     </v-sheet>
 
-                    <div v-else-if="filteredReceived.length" class="text-center text-caption text-medium-emphasis pt-2">{{ t('alreadyAtBottom') }}</div>
+                    <div v-if="renderedReceived.length < filteredReceived.length" ref="historySentinel" class="text-center py-2">
+                        <v-btn variant="text" size="small" @click="revealMore">{{ t('loadOlderMessages') }}</v-btn>
+                    </div>
+                    <div v-else-if="ws.historyLoading" role="status" class="text-center text-caption text-medium-emphasis py-2">
+                        {{ t(app.received.length ? 'loadingOlderMessages' : 'loadingLatestMessages') }}
+                    </div>
+                    <div v-if="ws.historyError" role="status" class="text-center py-2">
+                        <v-btn variant="text" size="small" @click="ws.loadHistoryFromHttp()">{{ t('retryHistory') }}</v-btn>
+                    </div>
+                    <div v-else-if="!ws.historyLoading && renderedReceived.length && renderedReceived.length === filteredReceived.length" class="text-center text-caption text-medium-emphasis pt-2">{{ t('alreadyAtBottom') }}</div>
                 </div>
             </v-card>
         </div>

@@ -1,4 +1,8 @@
 {
+  "loadOlderMessages": "載入更早訊息",
+  "loadingOlderMessages": "正在載入更早訊息…",
+  "loadingLatestMessages": "正在載入最新訊息…",
+  "retryHistory": "歷史載入失敗，點擊重試",
   "settings": "設定",
   "about": "關於",
   "github": "GitHub",
