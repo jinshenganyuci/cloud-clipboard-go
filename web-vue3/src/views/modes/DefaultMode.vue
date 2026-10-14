@@ -1,4 +1,4 @@
-<script setup>import { computed, nextTick, ref, watch } from 'vue';
+<script setup>import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { isImageName, looksLikeTable, looksLikeTaskList } from '@/util.js';
 import { useAppStore } from '@/store/app';
 import { useWebSocketStore } from '@/store/websocket';
@@ -15,8 +15,6 @@ const mdiImage = 'mdi-image-outline';
 const mdiFile = 'mdi-file-outline';
 const mdiCheckboxMarkedOutline = 'mdi-checkbox-marked-outline';
 const mdiTable = 'mdi-table';
-const tlLastRoom = ref('');
-let tlJustSwitched = false;
 
 
 const app = useAppStore();
@@ -93,25 +91,27 @@ function tlNearTop() {
     return window.scrollY < 120;
 }
 
-function tlScrollTop(smooth = true) {
-    window.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'auto' });
+function tlScrollTop() {
+    // History is already newest-first. Never animate through it, including
+    // when the browser restores an old scroll position on refresh.
+    window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
-watch(() => app.received, () => {
-    if (tlJustSwitched) {
-        tlJustSwitched = false;
-        nextTick(() => tlScrollTop(false));
-        return;
+onMounted(tlScrollTop);
+
+// Only follow a new leading message, not edits/deletions elsewhere in the
+// list. Read the position before Vue inserts cards and scroll anchoring runs.
+watch(() => app.received[0]?.id, (id, previousId) => {
+    if (id == null) return;
+    if (previousId == null || tlNearTop()) {
+        nextTick(tlScrollTop);
     }
-    if (!tlNearTop()) return;
-    nextTick(() => tlScrollTop(true));
 });
 
-watch(() => ws.room, (room) => {
-    if (tlLastRoom.value !== '' && tlLastRoom.value !== room) {
-        tlJustSwitched = true;
-    }
-    tlLastRoom.value = room;
+// The public room is the empty string, which is still a real room. Reset
+// immediately on every switch, even when the destination has no messages.
+watch(() => ws.room, () => {
+    nextTick(tlScrollTop);
 });
 
 </script>
