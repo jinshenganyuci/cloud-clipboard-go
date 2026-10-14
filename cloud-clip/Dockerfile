@@ -1,41 +1,57 @@
 # syntax=docker/dockerfile:1
 
-# 直接下载 GitHub Release 中已构建好的静态二进制（已内嵌前端静态资源），
-# 不再在镜像内编译前端/后端，大幅加快镜像生成。
-# 需要 build-arg: VERSION  (例如 v1.0.0)；
-# TARGETARCH / TARGETVARIANT 由 docker buildx 自动注入。
+# Build both parts from this checkout, including the fork's frontend fixes.
+FROM --platform=$BUILDPLATFORM node:24-alpine3.23 AS frontend
+WORKDIR /src/web-vue3
+COPY web-vue3/package.json web-vue3/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+COPY web-vue3/ ./
+COPY shortcuts/ /src/shortcuts/
+RUN npm run build
 
-FROM alpine:latest
-
-ARG VERSION
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine3.23 AS backend
+WORKDIR /src/cloud-clip
+COPY cloud-clip/go.mod cloud-clip/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cloud-clip/ ./
+COPY --from=frontend /src/web-vue3/dist/ ./lib/static/
+ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
+ARG VERSION=dev
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
+    go build -trimpath -tags=embed \
+    -ldflags="-s -w -X github.com/jonnyan404/cloud-clipboard-go/cloud-clip/lib.server_version=${VERSION}" \
+    -o /out/cloud-clipboard-go .
 
-# 运行时依赖
-RUN apk add --no-cache ca-certificates netcat-openbsd git tzdata \
-    && apk add --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing mkcert
+# Keep optional local TLS support without mixing Alpine stable and edge packages.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine3.23 AS certificates
+WORKDIR /src/mkcert
+RUN go mod init image/mkcert && go get filippo.io/mkcert@v1.4.4
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
+    go build -trimpath -ldflags="-s -w" -o /out/mkcert filippo.io/mkcert
 
+FROM alpine:3.23
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="Cloud Clipboard Go" \
+      org.opencontainers.image.source="https://github.com/jinshenganyuci/cloud-clipboard-go" \
+      org.opencontainers.image.version=$VERSION \
+      org.opencontainers.image.revision=$REVISION
+RUN apk add --no-cache ca-certificates netcat-openbsd git tzdata
 WORKDIR /app/server-node
+COPY --from=backend /out/cloud-clipboard-go ./cloud-clipboard-go
+COPY --from=certificates /out/mkcert /usr/local/bin/mkcert
+COPY --chmod=755 cloud-clip/entrypoint.sh /app/entrypoint.sh
+RUN mkdir -p /app/server-node/data
 
-COPY cloud-clip/entrypoint.sh /app/entrypoint.sh
-
-# 按平台映射 Release 归档名并解压出二进制
-RUN chmod +x /app/entrypoint.sh \
- && case "${TARGETARCH}-${TARGETVARIANT}" in \
-      amd64-*) B="linux-x86_64";; \
-      arm64-*) B="linux-aarch64";; \
-      arm-v7)  B="linux-armv7";; \
-      *) echo "不支持的平台: ${TARGETARCH}-${TARGETVARIANT}"; exit 1;; \
-    esac \
- && wget -q -O - "https://github.com/jonnyan404/cloud-clipboard-go/releases/download/${VERSION}/CCG_server-${B}-${VERSION}.tar.gz" \
-      | tar -xz -C /app/server-node/ cloud-clipboard-go \
- && chmod +x /app/server-node/cloud-clipboard-go
-
-# 暴露端口
 EXPOSE 9501
-
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=10s \
     CMD nc -z 127.0.0.1 "${LISTEN_PORT:-9501}" || exit 1
-
-# 运行应用
 ENTRYPOINT ["/app/entrypoint.sh"]

@@ -1,0 +1,23 @@
+# Only source and build inputs belong in the image context.
+**
+!cloud-clip/
+!cloud-clip/**
+!web-vue3/
+!web-vue3/**
+!shortcuts/
+!shortcuts/**
+**/node_modules
+**/.DS_Store
+web-vue3/dist
+web-vue3/public/shortcuts
+cloud-clip/lib/static
+cloud-clip/data
+cloud-clip/uploads
+cloud-clip/config.json
+cloud-clip/history.json
+cloud-clip/share-log.json
+cloud-clip/tasks.json
+cloud-clip/cloud-clip
+cloud-clip/clipboard
+cloud-clip/cloud-clipboard-go*
+shortcuts/android/shortcuts.json
